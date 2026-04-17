@@ -154,19 +154,16 @@ def _is_valid_website(url: str) -> bool:
 def extract_emails_from_website(website_url: str) -> list[str]:
     """
     爬取官網（首頁 + 聯絡頁面）擷取所有公開 email。
+    回傳 (emails, sources) 其中 sources 是 {email: 來源頁面URL}
     """
     if not website_url:
-        return []
+        return [], {}
 
     visited: set[str] = set()
-    emails: set[str] = set()
+    email_sources: dict[str, str] = {}  # email → 找到的頁面 URL
     base_domain = urlparse(website_url).netloc
 
-    # 第一輪：爬首頁，收集所有內部連結
-    urls_to_visit = [website_url]
     all_links = _collect_links(website_url, base_domain)
-
-    # 優先訪問聯絡頁面
     priority = [l for l in all_links if any(h in l.lower() for h in CONTACT_PAGE_HINTS)]
     others = [l for l in all_links if l not in priority]
     queue = [website_url] + priority + others
@@ -176,12 +173,16 @@ def extract_emails_from_website(website_url: str) -> list[str]:
             break
         visited.add(url)
         found = _extract_emails_from_page(url)
-        emails.update(found)
+        for email in found:
+            if email not in email_sources:
+                email_sources[email] = url
         if found:
             log.info(f"  {url} → {found}")
 
-    filtered = _filter_emails(emails)
-    return sorted(filtered)
+    filtered = _filter_emails(set(email_sources.keys()))
+    sorted_emails = sorted(filtered)
+    filtered_sources = {e: email_sources[e] for e in sorted_emails}
+    return sorted_emails, filtered_sources
 
 
 def _decode_cf_email(encoded: str) -> str:

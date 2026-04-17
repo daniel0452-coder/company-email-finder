@@ -65,11 +65,12 @@ def _do_search(name: str) -> dict:
         result = {"company_name": name, "website": None, "emails": [], "error": "找不到公司官網"}
         cache_set(name, result)
         return {**result, "cached": False}
-    emails = extract_emails_from_website(website)
+    emails, sources = extract_emails_from_website(website)
     result = {
         "company_name": name,
         "website": website,
         "emails": emails,
+        "email_sources": sources,
         "error": None if emails else "官網上找不到公開 email",
     }
     cache_set(name, result)
@@ -641,18 +642,26 @@ function renderBulkTable() {
   </div>
   <div class="table-wrap">
   <table>
-    <thead><tr><th>#</th><th>公司名稱</th><th>Email</th><th>狀態</th></tr></thead>
+    <thead><tr><th>#</th><th>公司名稱</th><th>Email</th><th>狀態</th><th>官網</th><th>找到 Email 的網址</th></tr></thead>
     <tbody>`;
   for (let i = 0; i < bulkResults.length; i++) {
     const r = bulkResults[i];
     const ok = r.emails && r.emails.length > 0;
+    const sources = r.email_sources || {};
     const emailsHtml = ok
       ? '<div class="email-pills">' + r.emails.map(e => `<span class="email-pill" data-email="${esc(e)}">${esc(e)}</span>`).join('') + '</div>'
       : '—';
     const badge = ok
       ? `<span class="badge badge-ok">✓ ${r.emails.length} 個</span>`
       : `<span class="badge badge-fail">${esc(r.error || '無')}</span>`;
-    h += `<tr><td style="color:#9ca3af">${i+1}</td><td>${esc(r.company_name)}</td><td>${emailsHtml}</td><td>${badge}</td></tr>`;
+    const websiteHtml = r.website
+      ? `<a href="${esc(r.website)}" target="_blank" rel="noopener" style="color:#2563eb;font-size:.8rem;word-break:break-all">${esc(r.website)}</a>`
+      : '—';
+    const sourceUrls = [...new Set(Object.values(sources))];
+    const sourcesHtml = sourceUrls.length
+      ? sourceUrls.map(u => `<a href="${esc(u)}" target="_blank" rel="noopener" style="color:#6b7280;font-size:.78rem;display:block;word-break:break-all">${esc(u)}</a>`).join('')
+      : '—';
+    h += `<tr><td style="color:#9ca3af">${i+1}</td><td>${esc(r.company_name)}</td><td>${emailsHtml}</td><td>${badge}</td><td>${websiteHtml}</td><td>${sourcesHtml}</td></tr>`;
   }
   h += '</tbody></table></div>';
   showResult(h);
@@ -660,12 +669,13 @@ function renderBulkTable() {
 
 // ── Download CSV ──────────────────────────────────────────────────────────────
 function downloadCSV() {
-  const rows = [['公司名稱', '官網', 'Email', '備註']];
+  const rows = [['公司名稱', 'Email', '狀態', '官網', '找到 Email 的網址']];
   for (const r of bulkResults) {
+    const sources = r.email_sources || {};
     if (r.emails && r.emails.length) {
-      for (const e of r.emails) rows.push([r.company_name, r.website || '', e, '']);
+      for (const e of r.emails) rows.push([r.company_name, e, '✓', r.website || '', sources[e] || '']);
     } else {
-      rows.push([r.company_name, r.website || '', '', r.error || '無結果']);
+      rows.push([r.company_name, '', r.error || '無結果', r.website || '', '']);
     }
   }
   const csv  = '\uFEFF' + rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
