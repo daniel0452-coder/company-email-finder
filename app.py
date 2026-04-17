@@ -38,16 +38,20 @@ def cache_set(key: str, data: dict):
 # ── Rate limiting ──────────────────────────────────────────────────────────────
 _rate_data: dict[str, list] = defaultdict(list)
 _rate_lock = threading.Lock()
-RATE_LIMIT = 10
+SINGLE_RATE_LIMIT = 30    # 單筆：每分鐘 30 次
+BULK_RATE_LIMIT   = 3     # 批量：每分鐘 3 次（每次可帶 200 間）
 RATE_WINDOW = 60
 
-def check_rate_limit(ip: str, cost: int = 1) -> bool:
+def check_rate_limit(ip: str, limit: int, cost: int = 1) -> bool:
     now = time.time()
     with _rate_lock:
         _rate_data[ip] = [t for t in _rate_data[ip] if now - t < RATE_WINDOW]
-        if len(_rate_data[ip]) + cost > RATE_LIMIT:
+        bucket = _rate_data[f"{ip}_{limit}"] = [
+            t for t in _rate_data.get(f"{ip}_{limit}", []) if now - t < RATE_WINDOW
+        ]
+        if len(bucket) + cost > limit:
             return False
-        _rate_data[ip].extend([now] * cost)
+        _rate_data[f"{ip}_{limit}"].extend([now] * cost)
         return True
 
 # ── 共用搜尋邏輯 ──────────────────────────────────────────────────────────────
@@ -79,8 +83,8 @@ class SearchRequest(BaseModel):
 @app.post("/api/search")
 async def search_email(req: SearchRequest, request: Request):
     ip = request.client.host
-    if not check_rate_limit(ip):
-        raise HTTPException(status_code=429, detail="請求太頻繁，請稍後再試（每分鐘限 10 次）")
+    if not check_rate_limit(ip, SINGLE_RATE_LIMIT):
+        raise HTTPException(status_code=429, detail="請求太頻繁，請稍後再試")
     name = req.company_name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="請輸入公司名稱")
@@ -99,13 +103,13 @@ async def bulk_search(req: BulkRequest, request: Request):
     companies = [c.strip() for c in req.companies if c.strip()][:BULK_LIMIT]
     if not companies:
         raise HTTPException(status_code=400, detail="請輸入至少一間公司名稱")
-    cost = min(len(companies), RATE_LIMIT)
-    if not check_rate_limit(ip, cost):
-        raise HTTPException(status_code=429, detail="請求太頻繁，請稍後再試")
+    if not check_rate_limit(ip, BULK_RATE_LIMIT):
+        raise HTTPException(status_code=429, detail="批量搜尋每分鐘限 3 次，請稍後再試")
 
     def event_stream():
         total = len(companies)
         completed = 0
+        last_ping = time.time()
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
             future_map = {pool.submit(_do_search, name): name for name in companies}
             for future in as_completed(future_map):
@@ -119,6 +123,10 @@ async def bulk_search(req: BulkRequest, request: Request):
                 payload = json.dumps({**data, "progress": completed, "total": total},
                                      ensure_ascii=False)
                 yield f"data: {payload}\n\n"
+                # keepalive ping 每 15 秒，防止 Railway 中斷連線
+                if time.time() - last_ping > 15:
+                    yield ": ping\n\n"
+                    last_ping = time.time()
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream",
