@@ -24,10 +24,23 @@ CONTACT_PAGE_HINTS = [
 
 # 排除不太可能是官網的域名
 SKIP_DOMAINS = {
-    "104.com.tw", "1111.com.tw", "facebook.com", "linkedin.com",
-    "instagram.com", "twitter.com", "x.com", "youtube.com",
-    "line.me", "google.com", "apple.com", "wikipedia.org",
-    "duckduckgo.com", "amazon.com", "shopee.tw", "ruten.com.tw",
+    # 人力銀行
+    "104.com.tw", "1111.com.tw", "518.com.tw", "yes123.com.tw",
+    # 社群媒體
+    "facebook.com", "linkedin.com", "instagram.com", "twitter.com",
+    "x.com", "youtube.com", "line.me", "threads.net",
+    # 搜尋 / 入口
+    "google.com", "google.com.tw", "duckduckgo.com", "bing.com", "yahoo.com",
+    # 電商 / 購物
+    "shopee.tw", "ruten.com.tw", "pchome.com.tw", "amazon.com",
+    "momo.com.tw", "rakuten.com.tw",
+    # 商業查詢 / 公司登記
+    "findcompany.com.tw", "twincn.com", "gcis.nat.gov.tw",
+    "company.g0v.tw", "opengovtw.com",
+    # 新聞 / 媒體
+    "wikipedia.org", "apple.com", "news.com.tw",
+    # 地圖
+    "maps.google.com", "openstreetmap.org",
 }
 
 
@@ -52,47 +65,80 @@ def search_104_website(company_name: str) -> Optional[str]:
     return _search_ddg_website(company_name)
 
 
-def _search_ddg_website(company_name: str) -> Optional[str]:
-    query = f"{company_name} official website"
-    url = f"https://html.duckduckgo.com/html/?q={quote(query)}&kl=tw-tzh"
+def _startpage_search(query: str) -> Optional[str]:
+    """用 Startpage（Google proxy）搜尋，回傳第一個有效非黑名單網址"""
+    url = f"https://www.startpage.com/search?q={quote(query)}"
     resp = _get(url)
     if not resp:
         return None
 
     soup = BeautifulSoup(resp.text, "html.parser")
-
-    for result in soup.select(".result__body"):
-        link_tag = result.select_one(".result__url")
-        if not link_tag:
-            continue
-
-        # 從 href 的 uddg 參數取出真實 URL
-        href = link_tag.get("href", "")
-        if "uddg=" in href:
-            qs = parse_qs(href.split("?", 1)[-1])
-            real_urls = qs.get("uddg", [])
-            if real_urls:
-                href = real_urls[0]
-
-        # 備用：直接用顯示文字
-        if not href.startswith("http"):
-            raw = link_tag.get_text(strip=True)
-            href = f"https://{raw}" if raw else ""
-
+    for a in soup.select(".result-link"):
+        href = a.get("href", "")
         if not href.startswith("http"):
             continue
-
         parsed = urlparse(href)
         domain = parsed.netloc.lstrip("www.")
-        if not domain:
+        if not domain or any(skip in domain for skip in SKIP_DOMAINS):
             continue
-        if any(skip in domain for skip in SKIP_DOMAINS):
-            continue
-
-        log.info(f"[{company_name}] DDG 找到官網: {href}")
         return f"https://{parsed.netloc}"
+    return None
 
-    log.warning(f"[{company_name}] DDG 搜尋無結果")
+
+def _ddg_search(query: str) -> Optional[str]:
+    """用 DDG Lite 搜尋，備援用"""
+    url = f"https://lite.duckduckgo.com/lite/?q={quote(query)}"
+    resp = _get(url)
+    if not resp:
+        return None
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    for tr in soup.find_all("tr"):
+        text = tr.get_text(strip=True)
+        m = re.search(r'([\w\-]+\.(com\.tw|tw|com|net|org|io)[\w/\-\.]*)', text)
+        if not m:
+            continue
+        raw = m.group(1).split("/")[0]
+        domain = raw.lstrip("www.")
+        if not domain or any(skip in domain for skip in SKIP_DOMAINS):
+            continue
+        return f"https://www.{domain}" if not raw.startswith("www.") else f"https://{raw}"
+    return None
+
+
+_COMPANY_SUFFIXES = re.compile(
+    r'(股份有限公司|有限公司|股份有限|有限|國際有限|實業有限|科技有限|生技有限'
+    r'|Co\.,? ?Ltd\.?|Inc\.?|Corp\.?|LLC\.?)$',
+    re.IGNORECASE
+)
+
+def _short_name(name: str) -> str:
+    """去掉常見公司後綴，取得簡短名稱用於搜尋"""
+    return _COMPANY_SUFFIXES.sub("", name).strip()
+
+
+def _search_ddg_website(company_name: str) -> Optional[str]:
+    """嘗試多種搜尋策略找到公司官網"""
+    short = _short_name(company_name)
+    queries = [
+        f"{company_name} 官網",
+        f"{short} 官網",
+        f"{short} 官方網站",
+        f"{short} official website",
+        short,
+    ]
+    # 去重（短名和全名相同時）
+    seen = set()
+    deduped = [q for q in queries if q not in seen and not seen.add(q)]
+
+    for query in deduped:
+        result = _startpage_search(query) or _ddg_search(query)
+        if result:
+            log.info(f"[{company_name}] 找到官網: {result} (query: {query})")
+            return result
+        time.sleep(0.5)
+
+    log.warning(f"[{company_name}] 所有搜尋策略均無結果")
     return None
 
 
