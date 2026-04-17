@@ -438,7 +438,7 @@ HTML = r"""<!DOCTYPE html>
     <div class="panel">
       <div class="panel-title">單筆搜尋</div>
       <label for="single-input">公司或品牌名稱</label>
-      <input type="text" id="single-input" placeholder="例：銨誌科技有限公司" autocomplete="off">
+      <input type="text" id="single-input" placeholder="例：雲發互動、SUPER 8" autocomplete="off">
       <button class="btn btn-primary btn-full" id="single-btn" onclick="singleSearch()">搜尋</button>
     </div>
 
@@ -458,7 +458,7 @@ HTML = r"""<!DOCTYPE html>
       <div class="or-divider">或直接貼上</div>
 
       <label for="bulk-input">公司名稱（一行一間）</label>
-      <textarea id="bulk-input" placeholder="台積電&#10;鴻海精密&#10;聯發科技"></textarea>
+      <textarea id="bulk-input" placeholder="雲發互動&#10;SUPER 8"></textarea>
       <p class="hint">每次最多 200 間</p>
 
       <div style="display:flex;gap:8px;margin-top:12px;">
