@@ -430,6 +430,7 @@ HTML = r"""<!DOCTYPE html>
       .main { grid-template-columns: 1fr; }
     }
   </style>
+<script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -473,6 +474,7 @@ HTML = r"""<!DOCTYPE html>
       <div style="display:flex;gap:8px;margin-top:12px;">
         <button class="btn btn-primary" style="flex:1" id="bulk-btn" type="button">開始搜尋</button>
         <button class="btn btn-secondary" id="dl-btn" type="button" style="display:none" onclick="downloadCSV()">下載 CSV</button>
+        <button class="btn btn-secondary" id="xl-btn" type="button" style="display:none" onclick="downloadExcel()">下載 Excel</button>
       </div>
 
       <div class="progress-wrap" id="progress-wrap">
@@ -583,12 +585,14 @@ async function bulkSearch() {
   const progressFill = document.getElementById('progress-fill');
   const progressLbl  = document.getElementById('progress-label');
   const dlBtn        = document.getElementById('dl-btn');
+  const xlBtn        = document.getElementById('xl-btn');
 
   btn.disabled = true;
   btn.innerHTML = '<span class="spin"></span> 搜尋中...';
   progressWrap.style.display = 'block';
   progressFill.style.width = '0%';
   dlBtn.style.display = 'none';
+  xlBtn.style.display = 'none';
   showPlaceholder('搜尋中，結果將陸續出現...');
 
   try {
@@ -627,6 +631,7 @@ async function bulkSearch() {
       }
     }
     dlBtn.style.display = 'inline-flex';
+    xlBtn.style.display = 'inline-flex';
   } catch (e) {
     showResult(`<div class="alert-box alert-error">連線失敗：${esc(e.message)}</div>`);
   } finally {
@@ -665,6 +670,25 @@ function renderBulkTable() {
   }
   h += '</tbody></table></div>';
   showResult(h);
+}
+
+// ── Download Excel ────────────────────────────────────────────────────────────
+function downloadExcel() {
+  const rows = [['公司名稱', 'Email', '狀態', '官網', '找到 Email 的網址']];
+  for (const r of bulkResults) {
+    const sources = r.email_sources || {};
+    if (r.emails && r.emails.length) {
+      for (const e of r.emails) rows.push([r.company_name, e, '找到', r.website || '', sources[e] || '']);
+    } else {
+      rows.push([r.company_name, '', r.error || '無結果', r.website || '', '']);
+    }
+  }
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  // 設定欄寬
+  ws['!cols'] = [{ wch: 30 }, { wch: 35 }, { wch: 12 }, { wch: 35 }, { wch: 45 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Email 搜尋結果');
+  XLSX.writeFile(wb, 'email_results.xlsx');
 }
 
 // ── Download CSV ──────────────────────────────────────────────────────────────
